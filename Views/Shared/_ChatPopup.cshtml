@@ -1,0 +1,131 @@
+@{
+    Layout = null;
+}
+
+<div id="chat-content" class="chat-messages">
+    <div class="chat-welcome">
+        <i class="fas fa-robot"></i>
+        <p>Hello! I'm your AI assistant. Ask me anything!</p>
+    </div>
+</div>
+
+<div id="typing-indicator" class="typing-indicator" style="display: none;">
+    <span class="typing-dot"></span>
+    <span class="typing-dot"></span>
+    <span class="typing-dot"></span>
+</div>
+
+<form method="post" id="chat-form" class="chat-input-form">
+    <div class="input-group">
+        <textarea id="chat-input" class="form-control" rows="1" placeholder="Type your message..." required></textarea>
+        <button type="submit" class="btn btn-send" id="send-btn">
+            <i class="fas fa-paper-plane"></i>
+        </button>
+    </div>
+</form>
+
+<script>
+    document.addEventListener("DOMContentLoaded", function () {
+        let sessionId = getSessionId();
+        fetchChatHistory(sessionId);
+        const chatInput = document.getElementById("chat-input");
+        chatInput.addEventListener("input", function () {
+            this.style.height = "auto";
+            this.style.height = Math.min(this.scrollHeight, 120) + "px";
+        });
+        chatInput.addEventListener("keydown", function (e) {
+            if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                document.getElementById("chat-form").dispatchEvent(new Event("submit"));
+            }
+        });
+    });
+
+    function fetchChatHistory(sessionId) {
+        $.ajax({
+            url: "/api/chat/" + encodeURIComponent(sessionId),
+            type: "GET",
+            contentType: "application/json",
+            success: function (data) {
+                if (data && data.length > 0) {
+                    var welcome = document.querySelector(".chat-welcome");
+                    if (welcome) welcome.remove();
+                    data.forEach(function (messageObj) {
+                        if (messageObj.sender === "User") {
+                            appendMessage(messageObj.message, "user");
+                        } else {
+                            appendMessage(messageObj.message, "bot");
+                        }
+                    });
+                }
+            },
+            error: function (xhr, status, error) {
+                console.error("Chat history request failed:", error);
+            }
+        });
+    }
+
+    document.getElementById("chat-form").addEventListener("submit", function (event) {
+        event.preventDefault();
+        var userMessage = document.getElementById("chat-input").value.trim();
+        if (userMessage === "") return;
+        var welcome = document.querySelector(".chat-welcome");
+        if (welcome) welcome.remove();
+        appendMessage(userMessage, "user");
+        var chatInput = document.getElementById("chat-input");
+        chatInput.value = "";
+        chatInput.style.height = "auto";
+        var typingIndicator = document.getElementById("typing-indicator");
+        typingIndicator.style.display = "flex";
+        var sendBtn = document.getElementById("send-btn");
+        sendBtn.disabled = true;
+        var sessionId = getSessionId();
+        $.ajax({
+            url: "/api/chat/",
+            type: "POST",
+            contentType: "application/json",
+            data: JSON.stringify({ userMessage: userMessage, sessionId: sessionId }),
+            success: function (data) {
+                typingIndicator.style.display = "none";
+                appendMessage(data.response, "bot");
+            },
+            error: function (xhr, status, error) {
+                console.error("Chat request failed:", error);
+                typingIndicator.style.display = "none";
+                appendMessage("Sorry, I'm having trouble connecting. Please try again.", "bot error");
+            },
+            complete: function () {
+                sendBtn.disabled = false;
+            }
+        });
+    });
+
+    function appendMessage(message, className) {
+        var chatContent = document.getElementById("chat-content");
+        var msgDiv = document.createElement("div");
+        msgDiv.className = "chat-message " + className;
+        var bubble = document.createElement("div");
+        bubble.className = "message-bubble";
+        bubble.textContent = message;
+        msgDiv.appendChild(bubble);
+        chatContent.appendChild(msgDiv);
+        chatContent.scrollTop = chatContent.scrollHeight;
+    }
+
+    function generateUUID() {
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+            var r = Math.random() * 16 | 0;
+            var v = c === 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+        });
+    }
+
+    function getSessionId() {
+        var sessionId = localStorage.getItem("chatSessionId");
+        if (!sessionId) {
+            sessionId = generateUUID();
+            localStorage.setItem("chatSessionId", sessionId);
+        }
+        return sessionId;
+    }
+</script>
