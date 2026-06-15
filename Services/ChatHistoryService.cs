@@ -14,6 +14,7 @@ public class ChatHistoryService
         {
             messages.Add(new ChatMessage
             {
+                SessionId = sessionId,
                 Sender = sender,
                 Message = message,
                 Timestamp = DateTime.UtcNow

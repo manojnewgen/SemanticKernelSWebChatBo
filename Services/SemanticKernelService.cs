@@ -7,17 +7,19 @@ namespace SemanticKernelSWebChatBot.Services
     {
         private readonly Kernel _kernel;
         private readonly IConfiguration _configuration;
+        private readonly ChatHistoryService _chatHistoryService;
 
-        public SemanticKernelService(IConfiguration configuration)
+        public SemanticKernelService(IConfiguration configuration, ChatHistoryService chatHistoryService)
         {
             _configuration = configuration;
+            _chatHistoryService = chatHistoryService;
 
             // Read configuration with fallback to environment variables
-                                            string? apiKey = _configuration["OpenApi:ApiKey"] ??
-                                                            Environment.GetEnvironmentVariable("OpenAI__ApiKey");
-            string? endpoint = _configuration["OpenApi:Endpoint"] ??
+            string? apiKey = _configuration["OpenAI:ApiKey"] ??
+                              Environment.GetEnvironmentVariable("OpenAI__ApiKey");
+            string? endpoint = _configuration["OpenAI:Endpoint"] ??
                                Environment.GetEnvironmentVariable("OpenAI__Endpoint");
-            string? deploymentName = _configuration["OpenApi:Model"] ??
+            string? deploymentName = _configuration["OpenAI:Model"] ??
                                      Environment.GetEnvironmentVariable("OpenAI__Model");
 
             if (string.IsNullOrWhiteSpace(apiKey))
@@ -45,9 +47,56 @@ namespace SemanticKernelSWebChatBot.Services
             _kernel = builder.Build();
         }
 
-        public async Task<string> ProcessUserInputAsync(string userInput)
+        public async Task<string> ProcessUserInputAsync(string sessionId, string userInput)
         {
-            var result = await _kernel.InvokePromptAsync(userInput);
+            // Sanitize helper: remove control chars and collapse whitespace
+            static string Sanitize(string s)
+            {
+                if (string.IsNullOrEmpty(s)) return string.Empty;
+                // Remove non-printable control characters
+                var cleaned = System.Text.RegularExpressions.Regex.Replace(s, "[\u0000-\u001F\u007F]+", " ");
+                // Collapse multiple whitespace
+                cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, "\\s+", " ").Trim();
+                return cleaned;
+            }
+
+            // Build a concise conversational context from the last N messages to reduce prompt size
+            var history = _chatHistoryService.GetHistory(sessionId) ?? new List<Models.ChatMessage>();
+            const int maxHistoryMessages = 8;
+            var recent = history.Skip(Math.Max(0, history.Count - maxHistoryMessages)).ToList();
+
+            var promptBuilder = new System.Text.StringBuilder();
+            promptBuilder.AppendLine("The following is a conversation between a user and an assistant. Answer concisely.");
+
+            foreach (var msg in recent)
+            {
+                var text = Sanitize(msg.Message);
+                if (string.Equals(msg.Sender, "User", StringComparison.OrdinalIgnoreCase))
+                {
+                    promptBuilder.AppendLine($"User: {text}");
+                }
+                else
+                {
+                    promptBuilder.AppendLine($"Assistant: {text}");
+                }
+            }
+
+            var safeInput = Sanitize(userInput);
+            promptBuilder.AppendLine($"User: {safeInput}");
+            promptBuilder.AppendLine("Assistant:");
+
+            // Limit prompt length to avoid triggering content checks due to overly long prompts
+            var prompt = promptBuilder.ToString();
+            const int maxPromptLength = 3000; // characters
+            if (prompt.Length > maxPromptLength)
+            {
+                prompt = prompt.Substring(prompt.Length - maxPromptLength);
+                // Ensure we start at a sensible boundary
+                var firstNewLine = prompt.IndexOf('\n');
+                if (firstNewLine > 0) prompt = prompt.Substring(firstNewLine + 1);
+            }
+
+            var result = await _kernel.InvokePromptAsync(prompt);
             return result.ToString();
         }
     }

@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using SemanticKernelSWebChatBot.Models;
+using Microsoft.SemanticKernel;
 using SemanticKernelSWebChatBot.Services;
 
 namespace SemanticKernelSWebChatBot.Controllers
@@ -47,15 +48,24 @@ namespace SemanticKernelSWebChatBot.Controllers
                 return BadRequest("Input cannot be empty.");
             }
 
+            // Use provided sessionId or create a new one
+            var sessionId = string.IsNullOrWhiteSpace(request.SessionId) ? Guid.NewGuid().ToString() : request.SessionId;
+
             try
             {
                 _logger.LogInformation("Processing chat request: {Message}", request.UserMessage);
-                string response = await _semanticKernelService.ProcessUserInputAsync(request.UserMessage);
+                string response = await _semanticKernelService.ProcessUserInputAsync(sessionId, request.UserMessage);
 
-                _chatHistoryService.AddMessage(request.SessionId, "User", request.UserMessage);
-                _chatHistoryService.AddMessage(request.SessionId, "Bot", response);
+                _chatHistoryService.AddMessage(sessionId, "User", request.UserMessage);
+                _chatHistoryService.AddMessage(sessionId, "Bot", response);
 
-                return Ok(new { Response = response });
+                return Ok(new { SessionId = sessionId, Response = response });
+            }
+            catch (HttpOperationException hex)
+            {
+                // Handle content filter responses gracefully
+                _logger.LogWarning(hex, "Content filter blocked the prompt: {Message}", hex.Message);
+                return BadRequest(new { Error = "Your message was blocked by content filters. Please rephrase and try again." });
             }
             catch (Exception ex)
             {
